@@ -2,11 +2,19 @@
 #set -x
 set -e
 
+help="
+project
+
+usage:
+	project issue add <project-name> <column-name> <issue-num>
+"
+
 main () {
 	# shellcheck disable=SC2154
 	if [ "$issue" ]; then
 		if [ "$add" ]; then
-			create-issue-card "$project_name" "$column_name" "$issue_num"
+			create-issue-card "$project_name" "$column_name" "$issue_num" ||\
+				echo "Could not add issue to project column."
 		fi
 	fi
 }
@@ -16,14 +24,22 @@ create-issue-card () {
 	column_name="$2"
 	issue_num=$3
 	issue_id=$(get-issue-id "$issue_num")
+	[ ! "$issue_id" ] && return 1
 	column_id=$(get-column-id "$project_name" "$column_name")
+	[ ! "$column_id" ] && return 1
 	req "projects/columns/$column_id/cards" \
 		POST "{\"content_id\": $issue_id, \"content_type\" :\"Issue\"}" > /dev/null
-	exit $?
+	return $?
 }
 
 get-issue-id () {
-	req "repos/$(curr-github-repo)/issues/$1" | jq -e '.id'
+	issue_num=$1
+	issue_id=$(req "repos/$(curr-github-repo)/issues/$issue_num" | ifne jq -e '.id')
+	if [ "$issue_id" == "" ]; then
+		echo "Could not find issue \"$issue_num\"." >&2
+		return 1
+	fi
+	echo "$issue_id"
 } 
 
 get-column-id () {
@@ -33,7 +49,7 @@ get-column-id () {
 	column_id=$(git config "$cache_key" || true)
 	if [ "$column_id" == "" ]; then
 		projectid=$(get-project-id "$project_name")
-		column_id=$(req "projects/$projectid/columns" | jq -e ".[] | select(.name == \"$column_name\") | .id")
+		column_id=$(req "projects/$projectid/columns" | ifne jq -e ".[] | select(.name == \"$column_name\") | .id")
 		if [ "$column_id" == "" ]; then
 			echo "Could not find column \"$project_name\" \"$column_name\"." >&2
 			return 1
@@ -58,19 +74,28 @@ req() {
 	preview_header="Accept: application/vnd.github.inertia-preview+json"
 	path=$1
 	method=${2-"GET"}
-	result=$(curl -s -L -w "%{http_code}" -X "$method" -H "$auth_header" -H "$preview_header" "https://api.github.com/$path" -d "$3")
+	result=$(curl -s -L -w "%{http_code}" -X "$method" -H "$auth_header" -H "$preview_header"\
+		"https://api.github.com/$path" -d "$3")
 	json=$(echo "$result" | head -n-1)
 	http_code=$(echo "$result" | tail -1)
-	if (echo "$http_code" | grep '^[45]'); then
+	if [ "$(echo "$http_code" | grep '^[45]')" != "" ]; then
 		message=$(echo "$json" | jq -r '.message')
 		errors=""
-		if (echo "$json" | jq -er '.errors'); then
+		if [ "$(echo "$json" | jq -er '.errors')" != "null" ]; then
 			errors=$(echo "$json" | jq -er '.errors | map(.message) | join(". ")')
 		fi
 		echo "Request failed $path $http_code $errors $message." >&2
 		return 1
 	fi
 	echo "$json"
+}
+
+ifne () {
+	stdin=$(cat -)
+	if [ "$stdin" == "" ]; then
+		return 1
+	fi
+	echo "$stdin" | "$@"
 }
 
 curr-github-repo () {
@@ -93,25 +118,6 @@ script_path=$(realpath -P "$0")
 script_directory=$(dirname "$script_path")
 script_directory=$(realpath "$script_directory")
 
-eval "$(
-"$script_directory/docopts" -h - : "$@" <<EOF
-project
-
-usage:
-	project issue add <project-name> <column-name> <issue-num>
-EOF
-)"
-
-# project card add alpha todo
-# project card add alpha todo -m
-
-# project issue add alpha todo 
-# project issue add alpha todo -m 
-
-# project issue move alpha todo 33 bottom
-# project issue move alpha todo 33 top
-
-# project issue add		alpha todo 33
-# project issue remove	alpha todo 33
+eval "$("$script_directory/docopts" -h "$help" : "$@")"
 
 main
