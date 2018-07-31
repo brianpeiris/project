@@ -1,0 +1,87 @@
+#! /usr/bin/env bash
+# set -x
+set -e
+
+main () {
+	if [ $issue ]; then
+		if [ $add ]; then
+			create-issue-card $project_name "$column_name" $issue_num
+		fi
+	fi
+}
+
+create-issue-card () {
+	project_name=$1
+	column_name="$2"
+	issue_num=$3
+	issue_id=`get-issue-id $issue_num`
+	req projects/columns/`get-column-id $project_name "$column_name"`/cards \
+		POST "{\"content_id\": $issue_id, \"content_type\" :\"Issue\"}" > /dev/null
+	exit $?
+}
+
+get-issue-id () {
+	req repos/`curr-github-repo`/issues/$1 | jq -e '.id'
+} 
+
+get-column-id () {
+	project_name=$1
+	column_name="$2"
+	projectid=`get-project-id $project_name`
+	req projects/$projectid/columns | jq -e ".[] | select(.name == \"$column_name\") | .id"
+}
+
+get-project-id() {
+	req repos/`curr-github-repo`/projects | jq -e ".[] | select(.name == \"$1\") | .id"
+}
+
+req() {
+	auth_header="Authorization: token $(cat ~/.config/hub | grep oauth | cut -d' ' -f4)"
+	preview_header="Accept: application/vnd.github.inertia-preview+json"
+	path=$1
+	method=${2-"GET"}
+	curl -s -L -X $method -H "$auth_header" -H "$preview_header" https://api.github.com/$path -d "$3"
+}
+
+curr-github-repo () {
+	git-curr-remote-url | cut -d':' -f2
+}
+
+git-curr-remote-url () {
+	git config remote.`git-curr-remote`.url
+}
+
+git-curr-remote () {
+	git config branch.`git-curr-branch`.remote
+}
+
+git-curr-branch () {
+	git rev-parse --abbrev-ref HEAD
+}
+
+script_path=$(realpath -P "$0")
+script_directory=$(dirname $script_path)
+script_directory=$(realpath "$script_directory")
+
+eval "$(
+$script_directory/docopts -h - : "$@" <<EOF
+project
+
+usage:
+	project issue add <project-name> <column-name> <issue-num>
+EOF
+)"
+
+# project card add alpha todo
+# project card add alpha todo -m
+
+# project issue add alpha todo 
+# project issue add alpha todo -m 
+
+# project issue move alpha todo 33 bottom
+# project issue move alpha todo 33 top
+
+# project issue add		alpha todo 33
+# project issue remove	alpha todo 33
+
+main
