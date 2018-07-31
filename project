@@ -1,11 +1,12 @@
 #! /usr/bin/env bash
-# set -x
+#set -x
 set -e
 
 main () {
-	if [ $issue ]; then
-		if [ $add ]; then
-			create-issue-card $project_name "$column_name" $issue_num
+	# shellcheck disable=SC2154
+	if [ "$issue" ]; then
+		if [ "$add" ]; then
+			create-issue-card "$project_name" "$column_name" "$issue_num"
 		fi
 	fi
 }
@@ -14,45 +15,74 @@ create-issue-card () {
 	project_name=$1
 	column_name="$2"
 	issue_num=$3
-	issue_id=`get-issue-id $issue_num`
-	req projects/columns/`get-column-id $project_name "$column_name"`/cards \
+	issue_id=$(get-issue-id "$issue_num")
+	column_id=$(get-column-id "$project_name" "$column_name")
+	req "projects/columns/$column_id/cards" \
 		POST "{\"content_id\": $issue_id, \"content_type\" :\"Issue\"}" > /dev/null
 	exit $?
 }
 
 get-issue-id () {
-	req repos/`curr-github-repo`/issues/$1 | jq -e '.id'
+	req "repos/$(curr-github-repo)/issues/$1" | jq -e '.id'
 } 
 
 get-column-id () {
 	project_name=$1
-	column_name="$2"
-	projectid=`get-project-id $project_name`
-	req projects/$projectid/columns | jq -e ".[] | select(.name == \"$column_name\") | .id"
+	column_name=$2
+	cache_key=$(get-column-cache-key "$project_name" "$column_name")
+	column_id=$(git config "$cache_key" || true)
+	if [ "$column_id" == "" ]; then
+		projectid=$(get-project-id "$project_name")
+		column_id=$(req "projects/$projectid/columns" | jq -e ".[] | select(.name == \"$column_name\") | .id")
+		if [ "$column_id" == "" ]; then
+			echo "Could not find column \"$project_name\" \"$column_name\"." >&2
+			return 1
+		fi
+		git config "$cache_key" "$column_id"
+	fi
+	echo "$column_id"
+}
+
+get-column-cache-key () {
+	project_name=${1// /-}
+	column_name=${2// /-}
+	echo "project.$project_name.$column_name"
 }
 
 get-project-id() {
-	req repos/`curr-github-repo`/projects | jq -e ".[] | select(.name == \"$1\") | .id"
+	req "repos/$(curr-github-repo)/projects" | jq -e ".[] | select(.name == \"$1\") | .id"
 }
 
 req() {
-	auth_header="Authorization: token $(cat ~/.config/hub | grep oauth | cut -d' ' -f4)"
+	auth_header="Authorization: token $(grep oauth ~/.config/hub | cut -d' ' -f4)"
 	preview_header="Accept: application/vnd.github.inertia-preview+json"
 	path=$1
 	method=${2-"GET"}
-	curl -s -L -X $method -H "$auth_header" -H "$preview_header" https://api.github.com/$path -d "$3"
+	result=$(curl -s -L -w "%{http_code}" -X "$method" -H "$auth_header" -H "$preview_header" "https://api.github.com/$path" -d "$3")
+	json=$(echo "$result" | head -n-1)
+	http_code=$(echo "$result" | tail -1)
+	if (echo "$http_code" | grep '^[45]'); then
+		message=$(echo "$json" | jq -r '.message')
+		errors=""
+		if (echo "$json" | jq -er '.errors'); then
+			errors=$(echo "$json" | jq -er '.errors | map(.message) | join(". ")')
+		fi
+		echo "Request failed $path $http_code $errors $message." >&2
+		return 1
+	fi
+	echo "$json"
 }
 
 curr-github-repo () {
-	git-curr-remote-url | cut -d':' -f2
+	git-curr-remote-url | cut -d':' -f2 | sed 's/.git$//'
 }
 
 git-curr-remote-url () {
-	git config remote.`git-curr-remote`.url
+	git config "remote.$(git-curr-remote).url"
 }
 
 git-curr-remote () {
-	git config branch.`git-curr-branch`.remote
+	git config "branch.$(git-curr-branch).remote"
 }
 
 git-curr-branch () {
@@ -60,11 +90,11 @@ git-curr-branch () {
 }
 
 script_path=$(realpath -P "$0")
-script_directory=$(dirname $script_path)
+script_directory=$(dirname "$script_path")
 script_directory=$(realpath "$script_directory")
 
 eval "$(
-$script_directory/docopts -h - : "$@" <<EOF
+"$script_directory/docopts" -h - : "$@" <<EOF
 project
 
 usage:
