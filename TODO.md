@@ -8,6 +8,8 @@ Implement these commands:
 	# Move and issue in a column
 	project issue move alpha todo 33 bottom
 	project issue move alpha todo 33 top
+	project issue move alpha todo 33 after 22
+	project issue move alpha todo 33 before 22
 
 	# Remove an issue from a column
 	project issue remove alpha todo 33
