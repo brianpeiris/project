@@ -20,7 +20,7 @@ main () {
 }
 
 create-issue-card () {
-	project_name=$1
+	project_name="$1"
 	column_name="$2"
 	issue_num=$3
 	issue_id=$(get-issue-id "$issue_num")
@@ -43,8 +43,8 @@ get-issue-id () {
 } 
 
 get-column-id () {
-	project_name=$1
-	column_name=$2
+	project_name="$1"
+	column_name="$2"
 	cache_key=$(get-column-cache-key "$project_name" "$column_name")
 	column_id=$(git config "$cache_key" || true)
 	if [ "$column_id" == "" ]; then
@@ -60,8 +60,8 @@ get-column-id () {
 }
 
 get-column-cache-key () {
-	project_name=${1// /-}
-	column_name=${2// /-}
+	project_name="${1// /-}"
+	column_name="${2// /-}"
 	echo "project.$project_name.$column_name"
 }
 
